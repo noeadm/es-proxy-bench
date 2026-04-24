@@ -1,0 +1,28 @@
+services:
+  es-proxy-bench:
+    build: .
+    image: es-proxy-bench:local
+    network_mode: host
+    volumes:
+      - ./results:/bench/results
+    environment:
+      # Opcjonalnie: "user:password" albo token w nagłówku poniżej
+      ES_BASIC_AUTH: ""
+      ES_BEARER_TOKEN: ""
+    command:
+      - --envoy
+      - ${ENVOY_URL:-http://127.0.0.1:10000}
+      - --haproxy
+      - ${HAPROXY_URL:-http://127.0.0.1:10001}
+      - --duration
+      - ${DURATION:-120}
+      - --warmup
+      - ${WARMUP:-20}
+      - --concurrency
+      - ${CONCURRENCY:-64}
+      - --seed-docs
+      - ${SEED_DOCS:-50000}
+      - --bulk-size
+      - ${BULK_SIZE:-200}
+      - --out-dir
+      - /bench/results
