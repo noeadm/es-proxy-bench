@@ -329,8 +329,46 @@ def latency_stats(values: list[float]) -> dict[str, float]:
     }
 
 
+
+def pct_delta(better: float, worse: float) -> float:
+    if worse == 0:
+        return 0.0
+    return round(((better / worse) - 1) * 100, 1)
+
+
+def pct_lower(better: float, worse: float) -> float:
+    if worse == 0:
+        return 0.0
+    return round((1 - (better / worse)) * 100, 1)
+
+
+def higher_winner(a_name: str, a_value: float, b_name: str, b_value: float):
+    if a_value == b_value:
+        return "remis", 0.0
+    if a_value > b_value:
+        return a_name, pct_delta(a_value, b_value)
+    return b_name, pct_delta(b_value, a_value)
+
+
+def lower_winner(a_name: str, a_value: float, b_name: str, b_value: float):
+    if a_value == b_value:
+        return "remis", 0.0
+    if a_value < b_value:
+        return a_name, pct_lower(a_value, b_value)
+    return b_name, pct_lower(b_value, a_value)
+
+
 def md_report(payload: dict[str, Any]) -> str:
     a, b = payload["results"]
+    a_lat = a["latency_ms"]
+    b_lat = b["latency_ms"]
+
+    rps_winner, rps_diff = higher_winner(a["name"], a["success_rps"], b["name"], b["success_rps"])
+    avg_winner, avg_diff = lower_winner(a["name"], a_lat["avg"], b["name"], b_lat["avg"])
+    p50_winner, p50_diff = lower_winner(a["name"], a_lat["p50"], b["name"], b_lat["p50"])
+    p95_winner, p95_diff = lower_winner(a["name"], a_lat["p95"], b["name"], b_lat["p95"])
+    p99_winner, p99_diff = lower_winner(a["name"], a_lat["p99"], b["name"], b_lat["p99"])
+
     lines = [
         f"# Elasticsearch proxy benchmark: {a['name']} vs {b['name']}",
         "",
@@ -338,22 +376,109 @@ def md_report(payload: dict[str, Any]) -> str:
         f"Index: `{payload['index']}`",
         f"Started: `{payload['started_at']}`",
         "",
-        "## Summary",
+        "## Wynik wprost",
+        "",
+        f"- **Większy throughput:** **{rps_winner}** o **{rps_diff}%**.",
+        f"- **Niższa średnia latencja:** **{avg_winner}** o **{avg_diff}%**.",
+        f"- **Niższe p50:** **{p50_winner}** o **{p50_diff}%**.",
+        f"- **Niższe p95:** **{p95_winner}** o **{p95_diff}%**.",
+        f"- **Niższe p99:** **{p99_winner}** o **{p99_diff}%**.",
+        f"- **Błędy:** {a['name']}={a['errors']}, {b['name']}={b['errors']}.",
+        "",
+        "## Interpretacja",
+        "",
+    ]
+
+    if rps_winner != "remis":
+        lines.append(f"- **{rps_winner} obsłużył więcej requestów na sekundę**, więc wygrał pod kątem przepustowości.")
+    if p95_winner != "remis":
+        lines.append(f"- **{p95_winner} miał lepsze p95**, czyli 95% udanych requestów kończyło się szybciej.")
+    if p99_winner != "remis":
+        lines.append(f"- **{p99_winner} miał lepsze p99**, czyli lepiej zachowywał się na ogonie latencji.")
+    if a["errors"] == 0 and b["errors"] == 0:
+        lines.append("- Oba proxy zakończyły test bez błędów HTTP/transportowych.")
+    elif a["errors"] != b["errors"]:
+        err_winner = a["name"] if a["errors"] < b["errors"] else b["name"]
+        lines.append(f"- Mniej błędów miał **{err_winner}**.")
+
+    lines += [
+        "",
+        "## Porównanie ogólne",
+        "",
+        "| metryka | " + a["name"] + " | " + b["name"] + " | lepszy | różnica |",
+        "|---|---:|---:|---|---:|",
+        f"| success rps | {a['success_rps']} | {b['success_rps']} | {rps_winner} | {rps_diff}% |",
+        f"| avg latency ms | {a_lat['avg']} | {b_lat['avg']} | {avg_winner} | {avg_diff}% niżej |",
+        f"| p50 latency ms | {a_lat['p50']} | {b_lat['p50']} | {p50_winner} | {p50_diff}% niżej |",
+        f"| p95 latency ms | {a_lat['p95']} | {b_lat['p95']} | {p95_winner} | {p95_diff}% niżej |",
+        f"| p99 latency ms | {a_lat['p99']} | {b_lat['p99']} | {p99_winner} | {p99_diff}% niżej |",
+        f"| errors | {a['errors']} | {b['errors']} | {'remis' if a['errors'] == b['errors'] else a['name'] if a['errors'] < b['errors'] else b['name']} | - |",
+        "",
+        "## Porównanie per operacja",
+        "",
+        "| operacja | RPS lepszy | różnica RPS | p95 lepszy | różnica p95 | p99 lepszy | różnica p99 |",
+        "|---|---|---:|---|---:|---|---:|",
+    ]
+
+    all_ops = sorted(set(a["operations"].keys()) | set(b["operations"].keys()))
+
+    for op in all_ops:
+        ao = a["operations"].get(op)
+        bo = b["operations"].get(op)
+
+        if not ao or not bo:
+            lines.append(f"| {op} | brak danych | - | brak danych | - | brak danych | - |")
+            continue
+
+        aop_lat = ao["latency_ms"]
+        bop_lat = bo["latency_ms"]
+
+        op_rps_winner, op_rps_diff = higher_winner(a["name"], ao["rps"], b["name"], bo["rps"])
+        op_p95_winner, op_p95_diff = lower_winner(a["name"], aop_lat["p95"], b["name"], bop_lat["p95"])
+        op_p99_winner, op_p99_diff = lower_winner(a["name"], aop_lat["p99"], b["name"], bop_lat["p99"])
+
+        lines.append(
+            f"| {op} | {op_rps_winner} | {op_rps_diff}% | "
+            f"{op_p95_winner} | {op_p95_diff}% | "
+            f"{op_p99_winner} | {op_p99_diff}% |"
+        )
+
+    lines += [
+        "",
+        "## Surowe podsumowanie",
         "",
         "| target | requests | errors | rps | success rps | avg ms | p50 | p95 | p99 |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
+
     for r in payload["results"]:
         lat = r["latency_ms"]
-        lines.append(f"| {r['name']} | {r['requests']} | {r['errors']} | {r['rps']} | {r['success_rps']} | {lat['avg']} | {lat['p50']} | {lat['p95']} | {lat['p99']} |")
-    lines += ["", "## Operations", ""]
+        lines.append(
+            f"| {r['name']} | {r['requests']} | {r['errors']} | {r['rps']} | "
+            f"{r['success_rps']} | {lat['avg']} | {lat['p50']} | {lat['p95']} | {lat['p99']} |"
+        )
+
+    lines += ["", "## Szczegóły operacji", ""]
+
     for r in payload["results"]:
-        lines += [f"### {r['name']} `{r['url']}`", "", "| op | requests | errors | rps | avg ms | p95 | p99 |", "|---|---:|---:|---:|---:|---:|---:|"]
+        lines += [
+            f"### {r['name']} `{r['url']}`",
+            "",
+            "| op | requests | errors | rps | avg ms | p95 | p99 |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+
         for op, stats in r["operations"].items():
             lat = stats["latency_ms"]
-            lines.append(f"| {op} | {stats['requests']} | {stats['errors']} | {stats['rps']} | {lat['avg']} | {lat['p95']} | {lat['p99']} |")
+            lines.append(
+                f"| {op} | {stats['requests']} | {stats['errors']} | {stats['rps']} | "
+                f"{lat['avg']} | {lat['p95']} | {lat['p99']} |"
+            )
+
         lines.append("")
-    return "\n".join(lines)
+
+    return "
+".join(lines)
 
 
 async def main_async(args):
