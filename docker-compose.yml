@@ -6,9 +6,12 @@ services:
     volumes:
       - ./results:/bench/results
     environment:
-      # Opcjonalnie: "user:password" albo token w nagłówku poniżej
-      ES_BASIC_AUTH: ""
-      ES_BEARER_TOKEN: ""
+      # Opcjonalnie: gotowy nagłówek Authorization, np. "Basic ZWxhc3RpYzpzZWNyZXQ="
+      # Ma wyższy priorytet niż ES_BASIC_AUTH i ES_BEARER_TOKEN.
+      ES_AUTH_HEADER: "${ES_AUTH_HEADER:-}"
+      # Alternatywnie: "user:password" albo bearer token.
+      ES_BASIC_AUTH: "${ES_BASIC_AUTH:-}"
+      ES_BEARER_TOKEN: "${ES_BEARER_TOKEN:-}"
     command:
       - --envoy
       - ${ENVOY_URL:-http://127.0.0.1:10000}

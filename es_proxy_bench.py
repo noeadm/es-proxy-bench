@@ -43,6 +43,16 @@ def now_iso() -> str:
 
 def build_headers(args) -> dict[str, str]:
     headers = {"Accept": "application/json"}
+
+    # Najwyższy priorytet: gotowa wartość nagłówka Authorization, np.
+    #   ES_AUTH_HEADER='Basic ZWxhc3RpYzpzZWNyZXQ='
+    # lub:
+    #   --auth-header 'Basic ZWxhc3RpYzpzZWNyZXQ='
+    auth_header = args.auth_header or os.getenv("ES_AUTH_HEADER")
+    if auth_header:
+        headers["Authorization"] = auth_header
+        return headers
+
     if args.basic_auth or os.getenv("ES_BASIC_AUTH"):
         raw = args.basic_auth or os.getenv("ES_BASIC_AUTH")
         token = base64.b64encode(raw.encode()).decode()
@@ -51,7 +61,6 @@ def build_headers(args) -> dict[str, str]:
         token = args.bearer_token or os.getenv("ES_BEARER_TOKEN")
         headers["Authorization"] = f"Bearer {token}"
     return headers
-
 
 def gen_doc(i: int, run_id: str) -> dict[str, Any]:
     services = ["checkout", "catalog", "payment", "search", "auth", "orders", "frontend"]
@@ -395,6 +404,7 @@ def parse_args():
     p.add_argument("--bulk-size", type=int, default=200, help="Rozmiar paczki bulk przy seedzie; live bulk używa 1/4 tej wartości")
     p.add_argument("--sleep-ms", type=float, default=0.0, help="Opcjonalna pauza po każdym requestcie workera")
     p.add_argument("--request-timeout", type=float, default=30.0)
+    p.add_argument("--auth-header", default="", help="Gotowa wartość nagłówka Authorization, np. Basic <base64>; alternatywnie env ES_AUTH_HEADER")
     p.add_argument("--basic-auth", default="", help="user:password; alternatywnie env ES_BASIC_AUTH")
     p.add_argument("--bearer-token", default="", help="Bearer token; alternatywnie env ES_BEARER_TOKEN")
     p.add_argument("--tls-insecure", action="store_true", help="Wyłącza walidację TLS dla HTTPS")
