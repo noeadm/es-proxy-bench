@@ -477,8 +477,7 @@ def md_report(payload: dict[str, Any]) -> str:
 
         lines.append("")
 
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 async def main_async(args):
